@@ -24,3 +24,9 @@ dist-ssr
 *.sw?
 .vercel
 .env
+supabase/.temp/
+supabase/cli-latest
+supabase/linked-project.json
+supabase/.temp/
+supabase/cli-latest
+supabase/linked-project.json
