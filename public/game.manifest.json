@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "gameId": "chesschuck",
+  "apiVersion": 1,
+  "defaultLocale": "en",
+  "locales": {
+    "en": {
+      "name": "ChessChuck",
+      "description": "Bet on how a grandmaster chess game ends: White wins, Draw or Black wins. Your result is drawn by on-chain VRF randomness right after you bet."
+    }
+  },
+  "presentation": {
+    "mode": "full-iframe",
+    "hostPanels": {
+      "openSession": false,
+      "history": false,
+      "status": false
+    }
+  },
+  "capabilities": {
+    "openSession": true,
+    "submitAction": false,
+    "forfeitExpiredSession": false,
+    "cancelStuckRandomness": false,
+    "resize": true
+  },
+  "rtp": 9500,
+  "predictions": [
+    {
+      "id": 0,
+      "label": "White Wins",
+      "color": "#F59E0B",
+      "multiplierBps": 25333,
+      "probabilityBps": 3750
+    },
+    {
+      "id": 1,
+      "label": "Draw",
+      "color": "#8B5CF6",
+      "multiplierBps": 27220,
+      "probabilityBps": 3490
+    },
+    {
+      "id": 2,
+      "label": "Black Wins",
+      "color": "#3B82F6",
+      "multiplierBps": 34420,
+      "probabilityBps": 2760
+    }
+  ]
+}
