@@ -3,8 +3,9 @@ import { createClient }                                        from '@supabase/s
 import { encodeAbiParameters, decodeAbiParameters, parseUnits, formatUnits } from 'viem'
 import { computeMaxWager }                                     from '../casino-sdk/guest'
 import { FaTrophy, FaSadTear, FaChevronLeft, FaChevronRight, FaCheck, FaSync, FaChevronDown } from 'react-icons/fa'
-import { GiChessKnight, GiChessPawn, GiChessRook, GiChessQueen, GiCastle } from 'react-icons/gi'
-import { BsGridFill, BsClockHistory, BsExclamationTriangleFill }            from 'react-icons/bs'
+import { GiChessKnight, GiChessPawn, GiChessRook, GiChessQueen, GiChessBishop, GiChessKing, GiCastle } from 'react-icons/gi'
+import { createSoundEngine } from '../audio/soundEngine'
+import { BsGridFill, BsClockHistory, BsListUl, BsExclamationTriangleFill, BsVolumeUpFill, BsVolumeMuteFill } from 'react-icons/bs'
 
 // Supabase client — live bets feed only, separate from App.jsx channel
 const liveSb = createClient(
@@ -54,6 +55,8 @@ const CSS = `
 @keyframes cc-slide-down { from{opacity:0;transform:translateY(-8px)}  to{opacity:1;transform:translateY(0)} }
 @keyframes cc-panel-in  { from{opacity:0;transform:translateX(-14px) scale(.97)} to{opacity:1;transform:translateX(0) scale(1)} }
 @keyframes cc-panel-out { from{opacity:1;transform:translateX(0) scale(1)} to{opacity:0;transform:translateX(-14px) scale(.97)} }
+@keyframes cc-sheet-in  { from{opacity:0;transform:translateY(24px)} to{opacity:1;transform:translateY(0)} }
+@keyframes cc-sheet-out { from{opacity:1;transform:translateY(0)} to{opacity:0;transform:translateY(24px)} }
 input[type=number]::-webkit-inner-spin-button,
 input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 input[type=number]{-moz-appearance:textfield}
@@ -64,6 +67,12 @@ input[type=number]{-moz-appearance:textfield}
 .cc-outcome:hover:not(:disabled){filter:brightness(1.08);transform:translateY(-1px) scale(1.01)}
 .cc-icon-btn:hover{opacity:.8}
 .cc-reload-row:hover{background:rgba(245,158,11,0.08)!important}
+@media (pointer: fine) {
+  body {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' width='32' height='32'%3E%3Cpath fill='%23F5F3EE' d='M60.81 476.91h300v-60h-300v60zm233.79-347.3l13.94 7.39c31.88-43.62 61.34-31.85 61.34-31.85l-21.62 53 35.64 19 2.87 33 64.42 108.75-43.55 29.37s-26.82-36.39-39.65-43.66c-10.66-6-41.22-10.25-56.17-12l-67.54-76.91-12 10.56 37.15 42.31c-.13.18-.25.37-.38.57-35.78 58.17 23 105.69 68.49 131.78H84.14C93 85 294.6 129.61 294.6 129.61z'/%3E%3C/svg%3E") 4 4, auto;
+  }
+  input, textarea { cursor: text; }
+}
 `
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -176,27 +185,45 @@ function ToastItem({ t, onRemove }) {
 }
 
 // sits just below the balance pill (balance is top:14 ~31px tall → toasts at top:60)
-function ToastStack({ toasts, onRemove }) {
+// embedded=true: render just the toast items, no own fixed position — used on
+// mobile where a shared parent stack (toasts + icon column) owns positioning,
+// so toasts and the icon column push each other via real flex layout instead
+// of two fixed positions guessing at each other's height.
+function ToastStack({ toasts, onRemove, embedded = false }) {
+  const items = toasts.map(t => <ToastItem key={t.id} t={t} onRemove={onRemove} />)
+  if (embedded) return <>{items}</>
   return (
     <div style={{
       position: 'fixed', top: 60, right: 14, zIndex: 600,
       display: 'flex', flexDirection: 'column', gap: 6,
       pointerEvents: 'none', alignItems: 'flex-end',
     }}>
-      {toasts.map(t => <ToastItem key={t.id} t={t} onRemove={onRemove} />)}
+      {items}
     </div>
   )
 }
 
-// ─── ReloadControl — top-left danger pill ────────────────────────────────────
-function ReloadControl() {
-  const [open, setOpen] = useState(false)
-
+// ─── LeftControls — wraps the danger pill + sound pill in one flex column,
+// so the sound pill gets pushed down automatically when the dropdown opens
+// instead of relying on a fixed offset that can collide with it ───────────
+function LeftControls({ compact = false }) {
   return (
     <div style={{
       position: 'fixed', top: 14, left: 14, zIndex: 300,
       display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6,
     }}>
+      <ReloadControl compact={compact} />
+      <SoundControl compact={compact} />
+    </div>
+  )
+}
+
+// ─── ReloadControl — top-left danger pill ────────────────────────────────────
+function ReloadControl({ compact = false }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
       {/* ── Trigger pill ──────────────────────────────────────────── */}
       <div style={{ ...glassSurface, borderRadius: 999, padding: 0, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
         {/* Icon zone */}
@@ -205,7 +232,7 @@ function ReloadControl() {
           className="cc-icon-btn"
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: '9px 11px 9px 13px',
+            padding: compact ? '9px 13px' : '9px 11px 9px 13px',
             background: 'transparent', border: 'none', cursor: 'pointer',
           }}
         >
@@ -215,23 +242,25 @@ function ReloadControl() {
             style={open ? { filter: 'drop-shadow(0 0 5px #F59E0B88)' } : undefined}
           />
         </button>
-        {/* Chevron zone — same border-left separator as BETS pill */}
-        <button
-          onClick={() => setOpen(o => !o)}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: '9px 11px 9px 6px',
-            background: 'transparent', border: 'none',
-            borderLeft: '1px solid rgba(255,255,255,0.06)',
-            cursor: 'pointer',
-          }}
-        >
-          <FaChevronDown
-            size={9}
-            color="rgba(255,255,255,0.22)"
-            style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s ease' }}
-          />
-        </button>
+        {/* Chevron zone — dropped on mobile to save width, icon zone alone still toggles */}
+        {!compact && (
+          <button
+            onClick={() => setOpen(o => !o)}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '9px 11px 9px 6px',
+              background: 'transparent', border: 'none',
+              borderLeft: '1px solid rgba(255,255,255,0.06)',
+              cursor: 'pointer',
+            }}
+          >
+            <FaChevronDown
+              size={9}
+              color="rgba(255,255,255,0.22)"
+              style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s ease' }}
+            />
+          </button>
+        )}
       </div>
 
       {/* ── Dropdown panel — opens downward ───────────────────────── */}
@@ -265,17 +294,86 @@ function ReloadControl() {
           </button>
         </div>
       )}
-    </div>
+    </>
   )
 }
 
-// ─── RightControls — ROOM toggle + live bets feed ────────────────────────────
-function RightControls({ envMode, onToggle }) {
-  const [roomExpanded, setRoomExpanded] = useState(false)
-  const [betsExpanded, setBetsExpanded] = useState(false)
-  const [betsOpen,     setBetsOpen]     = useState(false)
-  const [rounds,       setRounds]       = useState([])
-  const [tick,         setTick]         = useState(0)
+// ─── SoundControl — sits inside LeftControls, right under the danger pill ───
+function SoundControl({ compact = false }) {
+  const [on,       setOn]       = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const engineRef = useRef(null)
+
+  useEffect(() => {
+    engineRef.current = createSoundEngine()
+    return () => engineRef.current?.stop()
+  }, [])
+
+  const toggle = () => {
+    setOn(o => {
+      const next = !o
+      next ? engineRef.current?.start() : engineRef.current?.stop()
+      return next
+    })
+  }
+
+  return (
+    <div style={{ ...glassSurface, borderRadius: 999, padding: 0, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
+        <button
+          onClick={toggle}
+          className="cc-icon-btn"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: compact ? '9px 13px' : (expanded ? '9px 10px 9px 13px' : '9px 13px'),
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            transition: 'padding .22s',
+          }}
+        >
+          {on
+            ? <BsVolumeUpFill   size={13} color="#a78bfa" style={{ filter: 'drop-shadow(0 0 5px #a78bfa)' }} />
+            : <BsVolumeMuteFill size={13} color="rgba(255,255,255,0.40)" />
+          }
+        </button>
+        {!compact && expanded && (
+          <button
+            onClick={toggle}
+            style={{
+              fontFamily: INTER, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+              color: on ? '#a78bfa' : 'rgba(255,255,255,0.32)',
+              animation: 'cc-fadein .18s ease', whiteSpace: 'nowrap',
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              padding: '0 6px 0 0', lineHeight: 1,
+            }}
+          >
+            {on ? 'SOUND ON' : 'SOUND OFF'}
+          </button>
+        )}
+        {!compact && (
+          <button
+            onClick={() => setExpanded(o => !o)}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '9px 11px 9px 4px',
+              background: 'transparent', border: 'none',
+              borderLeft: '1px solid rgba(255,255,255,0.06)',
+              cursor: 'pointer', transition: 'color .15s',
+            }}
+          >
+            {expanded
+              ? <FaChevronLeft  size={9} color="rgba(255,255,255,0.22)" />
+              : <FaChevronRight size={9} color="rgba(255,255,255,0.22)" />
+            }
+          </button>
+        )}
+      </div>
+  )
+}
+
+// ─── RecentRoundsPanel — last completed rounds; shared by RightControls'
+// desktop dock and the mobile sheet, so this logic only lives in one place ──
+function RecentRoundsPanel() {
+  const [rounds, setRounds] = useState([])
+  const [tick,   setTick]   = useState(0)
 
   useEffect(() => {
     liveSb.from('rounds')
@@ -300,75 +398,105 @@ function RightControls({ envMode, onToggle }) {
     return () => { liveSb.removeChannel(ch); clearInterval(t) }
   }, [])
 
+  return (
+    <div className="cc-panel" style={{ maxHeight: 'calc(100vh - 190px)', overflowY: 'auto' }}>
+      {rounds.length === 0 ? (
+        <div style={{ padding: '20px 14px', textAlign: 'center', fontFamily: INTER, fontSize: 9, color: 'rgba(255,255,255,0.18)' }}>
+          No completed rounds yet
+        </div>
+      ) : rounds.map((r, i) => {
+        const meta = ROUND_META[r.outcome] ?? { label: (r.outcome ?? '?').toUpperCase(), color: '#fff' }
+        return (
+          <div key={r.round_id} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '8px 14px',
+            borderBottom: i < rounds.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+            background: i === 0 ? 'rgba(139,92,246,0.06)' : 'transparent',
+          }}>
+            <span style={{ fontFamily: MONO, fontSize: 8.5, color: 'rgba(255,255,255,0.2)', fontVariantNumeric: 'tabular-nums' }}>
+              #{r.round_id}
+            </span>
+            <span style={{ fontFamily: INTER, fontSize: 9, fontWeight: 700, color: meta.color, letterSpacing: '0.06em' }}>
+              {meta.label}
+            </span>
+            <span style={{ fontFamily: INTER, fontSize: 8, color: 'rgba(255,255,255,0.16)' }}>
+              {tick >= 0 && timeAgo(r.resolved_at)}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── RightControls — ROOM toggle + live bets feed + move log ────────────────
+function RightControls({
+  envMode, onToggle, moveLog = [],
+  isMobile = false, mobileSheet = null, setMobileSheet = () => {},
+  movesOpenIdx = 0, setMovesOpenIdx = () => {},
+  embedded = false,
+}) {
+  const [roomExpanded,  setRoomExpanded]  = useState(false)
+  const [betsExpanded,  setBetsExpanded]  = useState(false)
+  const [movesExpanded, setMovesExpanded] = useState(false)
+  const [activePanel,   setActivePanel]   = useState(null) // desktop/tablet only
+
+  // Whichever mechanism owns it right now
+  const shownPanel = isMobile ? mobileSheet : activePanel
+
+  useEffect(() => {
+    if (moveLog.length === 0) setMovesOpenIdx(0)
+  }, [moveLog])
+
   const pillBase = {
     ...glassSurface,
     display: 'flex', alignItems: 'center',
     border: 'none', cursor: 'pointer',
     transition: 'all .22s cubic-bezier(.23,1,.32,1)',
+    pointerEvents: 'auto', // needed once embedded inside a pointerEvents:none parent stack
   }
 
-  return (
-    <div style={{
-      position: 'fixed', right: 14, zIndex: 300,
-      display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
-      // when bets panel is open, pin to bottom-right so the panel opens upward
-      // without ever entering the balance / toast zone at the top
-      ...(betsOpen
-        ? { bottom: 24 }
-        : { top: '50%', transform: 'translateY(-50%)' }
-      ),
-    }}>
+  const openBets = () => {
+    if (isMobile) setMobileSheet(p => (p === 'bets' ? null : 'bets'))
+    else setActivePanel(p => (p === 'bets' ? null : 'bets'))
+  }
+  const openMoves = () => {
+    if (isMobile) setMobileSheet(p => (p === 'moves' ? null : 'moves'))
+    else setActivePanel(p => (p === 'moves' ? null : 'moves'))
+    setMovesOpenIdx(moveLog.length)
+  }
 
-      {/* ── Live bets panel — opens upward ──────────────────────────── */}
-      {betsOpen && (
+  const pills = (
+    <>
+      {/* ── Docked panel — desktop/tablet only. On mobile, BETS/MOVES
+          render inside the shared bottom sheet in BettingPanel instead ── */}
+      {!isMobile && activePanel && (
         <div style={{
-          position: 'absolute', bottom: 'calc(100% + 10px)', right: 0,
-          width: 232,
+          position: 'fixed', right: 92, top: '50%', transform: 'translateY(-50%)',
+          width: 268,
           ...glassSurface,
           borderRadius: 16, overflow: 'hidden',
-          animation: 'cc-slide-up .22s cubic-bezier(.23,1,.32,1)',
+          animation: 'cc-panel-in .22s cubic-bezier(.23,1,.32,1)',
         }}>
           <div style={{
             padding: '10px 14px 8px',
             borderBottom: '1px solid rgba(255,255,255,0.06)',
             fontFamily: INTER, fontSize: 9, fontWeight: 700,
             letterSpacing: '0.16em', color: 'rgba(255,255,255,0.25)',
-          }}>RECENT ROUNDS</div>
-          <div className="cc-panel" style={{ maxHeight: 'calc(100vh - 190px)', overflowY: 'auto' }}>
-            {rounds.length === 0 ? (
-              <div style={{ padding: '20px 14px', textAlign: 'center', fontFamily: INTER, fontSize: 9, color: 'rgba(255,255,255,0.18)' }}>
-                No completed rounds yet
-              </div>
-            ) : rounds.map((r, i) => {
-              const meta = ROUND_META[r.outcome] ?? { label: (r.outcome ?? '?').toUpperCase(), color: '#fff' }
-              return (
-                <div key={r.round_id} style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '8px 14px',
-                  borderBottom: i < rounds.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
-                  background: i === 0 ? 'rgba(139,92,246,0.06)' : 'transparent',
-                }}>
-                  <span style={{ fontFamily: MONO, fontSize: 8.5, color: 'rgba(255,255,255,0.2)', fontVariantNumeric: 'tabular-nums' }}>
-                    #{r.round_id}
-                  </span>
-                  <span style={{ fontFamily: INTER, fontSize: 9, fontWeight: 700, color: meta.color, letterSpacing: '0.06em' }}>
-                    {meta.label}
-                  </span>
-                  <span style={{ fontFamily: INTER, fontSize: 8, color: 'rgba(255,255,255,0.16)' }}>
-                    {tick >= 0 && timeAgo(r.resolved_at)}
-                  </span>
-                </div>
-              )
-            })}
+          }}>
+            {activePanel === 'bets' ? 'RECENT ROUNDS' : 'MOVE HISTORY'}
           </div>
+          {activePanel === 'bets'
+            ? <RecentRoundsPanel />
+            : <MoveLogPanel moveLog={moveLog} openIndex={movesOpenIdx} />
+          }
         </div>
       )}
 
-      {/* ── Bets toggle pill — same 3-zone structure as ROOM pill ────── */}
+      {/* ── Bets toggle pill ───────────────────────────────────────── */}
       <div style={{ ...pillBase, borderRadius: 999, padding: 0, overflow: 'hidden' }}>
-        {/* Icon zone — click to open/close bets panel */}
         <button
-          onClick={() => setBetsOpen(o => !o)}
+          onClick={openBets}
           className="cc-icon-btn"
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -379,17 +507,16 @@ function RightControls({ envMode, onToggle }) {
         >
           <BsClockHistory
             size={13}
-            color={betsOpen ? '#a78bfa' : 'rgba(255,255,255,0.40)'}
-            style={betsOpen ? { filter: 'drop-shadow(0 0 5px #a78bfa)' } : undefined}
+            color={shownPanel === 'bets' ? '#a78bfa' : 'rgba(255,255,255,0.40)'}
+            style={shownPanel === 'bets' ? { filter: 'drop-shadow(0 0 5px #a78bfa)' } : undefined}
           />
         </button>
-        {/* Label — visible only when expanded; also toggles bets */}
         {betsExpanded && (
           <button
-            onClick={() => setBetsOpen(o => !o)}
+            onClick={openBets}
             style={{
               fontFamily: INTER, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-              color: betsOpen ? '#a78bfa' : 'rgba(255,255,255,0.32)',
+              color: shownPanel === 'bets' ? '#a78bfa' : 'rgba(255,255,255,0.32)',
               animation: 'cc-fadein .18s ease', whiteSpace: 'nowrap',
               background: 'transparent', border: 'none', cursor: 'pointer',
               padding: '0 6px 0 0', lineHeight: 1,
@@ -398,7 +525,6 @@ function RightControls({ envMode, onToggle }) {
             BETS
           </button>
         )}
-        {/* Arrow zone — toggles label expansion */}
         <button
           onClick={() => setBetsExpanded(o => !o)}
           style={{
@@ -416,9 +542,57 @@ function RightControls({ envMode, onToggle }) {
         </button>
       </div>
 
+      {/* ── Moves toggle pill ───────────────────────────────────────── */}
+      <div style={{ ...pillBase, borderRadius: 999, padding: 0, overflow: 'hidden' }}>
+        <button
+          onClick={openMoves}
+          className="cc-icon-btn"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: movesExpanded ? '9px 10px 9px 13px' : '9px 13px',
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            transition: 'padding .22s',
+          }}
+        >
+          <BsListUl
+            size={13}
+            color={shownPanel === 'moves' ? '#a78bfa' : 'rgba(255,255,255,0.40)'}
+            style={shownPanel === 'moves' ? { filter: 'drop-shadow(0 0 5px #a78bfa)' } : undefined}
+          />
+        </button>
+        {movesExpanded && (
+          <button
+            onClick={openMoves}
+            style={{
+              fontFamily: INTER, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+              color: shownPanel === 'moves' ? '#a78bfa' : 'rgba(255,255,255,0.32)',
+              animation: 'cc-fadein .18s ease', whiteSpace: 'nowrap',
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              padding: '0 6px 0 0', lineHeight: 1,
+            }}
+          >
+            MOVES
+          </button>
+        )}
+        <button
+          onClick={() => setMovesExpanded(o => !o)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '9px 11px 9px 4px',
+            background: 'transparent', border: 'none',
+            borderLeft: '1px solid rgba(255,255,255,0.06)',
+            cursor: 'pointer', transition: 'color .15s',
+          }}
+        >
+          {movesExpanded
+            ? <FaChevronLeft  size={9} color="rgba(255,255,255,0.22)" />
+            : <FaChevronRight size={9} color="rgba(255,255,255,0.22)" />
+          }
+        </button>
+      </div>
+
       {/* ── Room toggle pill — icon click = toggle, › click = expand ── */}
       <div style={{ ...pillBase, borderRadius: 999, padding: 0, overflow: 'hidden' }}>
-        {/* Icon zone — click to toggle room */}
         <button
           onClick={onToggle}
           title={envMode ? 'Switch to plain' : 'Switch to room'}
@@ -435,7 +609,6 @@ function RightControls({ envMode, onToggle }) {
             : <BsGridFill size={13} color="rgba(255,255,255,0.40)" />
           }
         </button>
-        {/* FIX: label is now a button so PLAIN/ROOM text is also clickable */}
         {roomExpanded && (
           <button
             onClick={onToggle}
@@ -450,7 +623,6 @@ function RightControls({ envMode, onToggle }) {
             {envMode ? 'ROOM' : 'PLAIN'}
           </button>
         )}
-        {/* Arrow zone — click to expand/collapse label */}
         <button
           onClick={() => setRoomExpanded(o => !o)}
           style={{
@@ -458,16 +630,99 @@ function RightControls({ envMode, onToggle }) {
             padding: '9px 11px 9px 4px',
             background: 'transparent', border: 'none', borderLeft: '1px solid rgba(255,255,255,0.06)',
             cursor: 'pointer',
-            transition: 'color .15s',
           }}
         >
-          {/* FIX: replaced ‹/› unicode with react-icons */}
           {roomExpanded
             ? <FaChevronLeft  size={9} color="rgba(255,255,255,0.22)" />
             : <FaChevronRight size={9} color="rgba(255,255,255,0.22)" />
           }
         </button>
       </div>
+    </>
+  )
+
+  if (embedded) return pills
+
+  return (
+    <div style={{
+      position: 'fixed', right: 14, top: '50%', transform: 'translateY(-50%)', zIndex: 300,
+      display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
+    }}>
+      {pills}
+    </div>
+  )
+}
+
+// ─── MoveLogPanel — 4-row rolling window, oldest fades out as a new one lands ──
+const PIECE_ICONS = { p: GiChessPawn, n: GiChessKnight, b: GiChessBishop, r: GiChessRook, q: GiChessQueen, k: GiChessKing }
+// Board piece colors are tuned for studio lighting on 3D meshes — literal
+// near-black reads as invisible on this flat glass panel, so black pieces
+// get a lighter cool-grey tint here instead of the board's actual C.BLACK_PC.
+const PIECE_TINT  = { w: '#F5F3EE', b: '#9AA3B8' }
+
+function MoveRow({ m }) {
+  const Icon     = PIECE_ICONS[m.piece] ?? GiChessPawn
+  const CapIcon  = m.captured ? (PIECE_ICONS[m.captured] ?? GiChessPawn) : null
+  const capColor = m.color === 'w' ? 'b' : 'w' // captured piece is always the opposite color
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+      <Icon size={13} color={PIECE_TINT[m.color]} style={{ flexShrink: 0 }} />
+      <span>moved to {m.to}</span>
+      {CapIcon && (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          (captured <CapIcon size={13} color={PIECE_TINT[capColor]} style={{ flexShrink: 0 }} />)
+        </span>
+      )}
+    </span>
+  )
+}
+
+function MoveLogPanel({ moveLog, openIndex }) {
+  const [rows, setRows] = useState([])
+  const seenRef = useRef(openIndex)
+
+  // Panel just opened, or the round reset — clear and re-anchor to the new offset
+  useEffect(() => {
+    seenRef.current = openIndex
+    setRows([])
+  }, [openIndex])
+
+  // New moves landed — append, and if we're over 4, animate the oldest out
+  useEffect(() => {
+    if (moveLog.length <= seenRef.current) return
+    const fresh = moveLog.slice(seenRef.current).map((m, i) => ({ ...m, _id: `${seenRef.current + i}` }))
+    seenRef.current = moveLog.length
+    setRows(prev => {
+      const merged = [...prev, ...fresh]
+      if (merged.length > 4) {
+        const leavingId = merged[0]._id
+        setTimeout(() => setRows(r => r.filter(row => row._id !== leavingId)), 260)
+        return merged.map((row, i) => i === 0 ? { ...row, leaving: true } : row)
+      }
+      return merged
+    })
+  }, [moveLog, openIndex])
+
+  return (
+    <div>
+      {rows.length === 0 ? (
+        <div style={{ padding: '20px 14px', textAlign: 'center', fontFamily: INTER, fontSize: 9, color: 'rgba(255,255,255,0.18)' }}>
+          Waiting for the next move…
+        </div>
+      ) : [...rows].reverse().map((r, i, arr) => (
+        <div key={r._id} style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '10px 14px',
+          borderBottom: i < arr.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+          background: i === 0 ? 'rgba(139,92,246,0.06)' : 'transparent',
+          fontFamily: INTER, fontSize: 9.5, color: 'rgba(255,255,255,0.55)',
+          animation: r.leaving
+            ? 'cc-toast-out .26s cubic-bezier(.32,0,.67,0) forwards'
+            : 'cc-slide-down .22s cubic-bezier(.23,1,.32,1)',
+        }}>
+          <MoveRow m={r} />
+        </div>
+      ))}
     </div>
   )
 }
@@ -496,7 +751,16 @@ export default function BettingPanel({
   hostApi, snapshot, isDemo,
   envMode = false, onEnvToggle = () => {},
   panelW = 288,
+  moveLog = [],
+  tier = 'desktop',
 }) {
+  const isMobile = tier === 'mobile'
+  const isTablet = tier === 'tablet'
+  // Mobile-only: BET / BETS / MOVES share one bottom-sheet slot instead of
+  // separately-floating chrome. Desktop/tablet keep the existing independent
+  // panelOpen + RightControls' own activePanel — untouched, this is unused there.
+  const [mobileSheet,  setMobileSheet]  = useState(null) // null | 'bet' | 'bets' | 'moves'
+  const [movesOpenIdx, setMovesOpenIdx] = useState(0)
   const [tick,        setTick]        = useState(0)
   const [selected,    setSelected]    = useState(null)
   const [wagerInput,  setWagerInput]  = useState('10')
@@ -526,10 +790,11 @@ export default function BettingPanel({
 
   // FIX: close panel with exit animation
   const handlePanelClose = useCallback(() => {
+    if (isMobile) { setMobileSheet(null); return }
     setPanelOpen(false)
     setPanelClosing(true)
     setTimeout(() => setPanelClosing(false), 240)
-  }, [])
+  }, [isMobile])
 
   useEffect(() => { const id = setInterval(() => setTick(t => t + 1), 1000); return () => clearInterval(id) }, [])
 
@@ -853,68 +1118,145 @@ export default function BettingPanel({
   return (
     <>
       <style>{CSS}</style>
-      <ToastStack toasts={toasts} onRemove={removeToast} />
-      <ReloadControl />
-      <RightControls envMode={envMode} onToggle={onEnvToggle} />
+      {isMobile ? (
+        <div style={{
+          position: 'fixed', top: 60, right: 14, zIndex: 600,
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
+          pointerEvents: 'none',
+        }}>
+          <ToastStack toasts={toasts} onRemove={removeToast} embedded />
+          <RightControls
+            envMode={envMode} onToggle={onEnvToggle} moveLog={moveLog}
+            isMobile mobileSheet={mobileSheet} setMobileSheet={setMobileSheet}
+            movesOpenIdx={movesOpenIdx} setMovesOpenIdx={setMovesOpenIdx}
+            embedded
+          />
+        </div>
+      ) : (
+        <>
+          <ToastStack toasts={toasts} onRemove={removeToast} />
+          <RightControls
+            envMode={envMode} onToggle={onEnvToggle} moveLog={moveLog}
+            isMobile={false} mobileSheet={mobileSheet} setMobileSheet={setMobileSheet}
+            movesOpenIdx={movesOpenIdx} setMovesOpenIdx={setMovesOpenIdx}
+          />
+        </>
+      )}
+      <LeftControls compact={isMobile} />
 
       {/* ── Balance — top right ──────────────────────────────────────── */}
       <div style={{
         position: 'fixed', top: 14, right: 14, zIndex: 300, pointerEvents: 'none',
-        display: 'flex', alignItems: 'center', gap: 7, padding: '7px 16px',
+        display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 7, padding: isMobile ? '6px 11px' : '7px 16px',
         ...glassSurface, borderRadius: 999,
       }}>
-        <span style={{ fontFamily: INTER, fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.28)', letterSpacing: '0.08em' }}>BAL</span>
-        <span style={{ fontFamily: INTER, fontSize: 15, fontWeight: 800, fontVariantNumeric: 'tabular-nums', transition: 'color .3s', color: 'rgba(255,255,255,0.92)' }} ref={balTextRef}>
+        {!isMobile && <span style={{ fontFamily: INTER, fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.28)', letterSpacing: '0.08em' }}>BAL</span>}
+        <span style={{ fontFamily: INTER, fontSize: isMobile ? 12 : 15, fontWeight: 800, fontVariantNumeric: 'tabular-nums', transition: 'color .3s', color: 'rgba(255,255,255,0.92)' }} ref={balTextRef}>
           {null}
         </span>
-        <span style={{ fontFamily: INTER, fontSize: 10, fontWeight: 500, color: 'rgba(255,255,255,0.30)' }}>{symbol}</span>
+        <span style={{ fontFamily: INTER, fontSize: isMobile ? 8.5 : 10, fontWeight: 500, color: 'rgba(255,255,255,0.30)' }}>{symbol}</span>
       </div>
 
-      {/* ── Status pill — TRUE center of full viewport ───────────────── */}
-      <div style={{
-        position: 'fixed', top: 14, left: '50%', transform: 'translateX(-50%)',
-        zIndex: 300, pointerEvents: 'none',
-        display: 'flex', alignItems: 'center', gap: 8, padding: '7px 17px',
-        ...glassSurface, borderRadius: 999,
-        fontFamily: INTER, fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', whiteSpace: 'nowrap',
-      }}>
-        {isDeciding
-          ? <Spinner color={pillColor} size={12} />
-          : <PhaseIcon phase={phase} color={pillColor} isResult={isResult} />
-        }
-        <span style={{ color: 'rgba(255,255,255,0.65)' }}>
+      {/* ── Status pill — centered on the full viewport on desktop, but
+          centered within the safe gap between the side pills on mobile, with
+          a hard width cap so long deciding-text truncates instead of
+          stretching over the balance pill ─────────────────────────────── */}
+      {isMobile ? (
+        <div style={{
+          position: 'fixed', top: 14, left: 64, right: 100, zIndex: 300, pointerEvents: 'none',
+          display: 'flex', justifyContent: 'center',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px',
+            ...glassSurface, borderRadius: 999,
+            fontFamily: INTER, fontSize: 8, fontWeight: 600, letterSpacing: '0.05em',
+            maxWidth: '100%', overflow: 'hidden',
+          }}>
+            {isDeciding
+              ? <Spinner color={pillColor} size={10} />
+              : <PhaseIcon phase={phase} color={pillColor} isResult={isResult} />
+            }
+            <span style={{ color: 'rgba(255,255,255,0.65)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {isDeciding
+                ? <span key={decidingIdx} style={{ animation: 'cc-fadein .3s ease' }}>{DECIDING_TEXTS[decidingIdx]}</span>
+                : phase === 'betting_open'   ? 'BET OPEN'
+                : phase === 'betting_locked' ? 'LOCKED'
+                : isResult && resultOutcome  ? <span style={{ color: resultOutcome.color, fontWeight: 800 }}>{resultOutcome.label}</span>
+                : 'WAITING'
+              }
+            </span>
+            {!isDeciding && countdown !== null && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                <span style={{ color: 'rgba(255,255,255,0.15)' }}>·</span>
+                <span style={{
+                  fontFamily: MONO, fontVariantNumeric: 'tabular-nums',
+                  color: countdown <= 10 ? '#F59E0B' : 'rgba(255,255,255,0.82)',
+                  fontWeight: 700,
+                }}>{countdown}s</span>
+              </span>
+            )}
+            {isDemo && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                <span style={{ color: 'rgba(255,255,255,0.14)' }}>·</span>
+                <span style={{ padding: '1px 5px', background: 'rgba(139,92,246,0.22)', border: '1px solid rgba(139,92,246,0.38)', borderRadius: 6, color: '#a78bfa', fontSize: 7, fontWeight: 700 }}>DEMO</span>
+              </span>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          position: 'fixed', top: 14, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 300, pointerEvents: 'none',
+          display: 'flex', alignItems: 'center', gap: 8, padding: '7px 17px',
+          ...glassSurface, borderRadius: 999,
+          fontFamily: INTER, fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', whiteSpace: 'nowrap',
+        }}>
           {isDeciding
-            ? <span key={decidingIdx} style={{ animation: 'cc-fadein .3s ease' }}>{DECIDING_TEXTS[decidingIdx]}</span>
-            : phase === 'betting_open'   ? 'BET OPEN'
-            : phase === 'betting_locked' ? 'LOCKED'
-            : isResult && resultOutcome  ? <span style={{ color: resultOutcome.color, fontWeight: 800 }}>{resultOutcome.label}</span>
-            : 'WAITING'
+            ? <Spinner color={pillColor} size={12} />
+            : <PhaseIcon phase={phase} color={pillColor} isResult={isResult} />
           }
-        </span>
-        {!isDeciding && countdown !== null && (
-          <>
-            <span style={{ color: 'rgba(255,255,255,0.15)' }}>·</span>
-            <span style={{
-              fontFamily: MONO, fontVariantNumeric: 'tabular-nums',
-              color: countdown <= 10 ? '#F59E0B' : 'rgba(255,255,255,0.82)',
-              fontWeight: 700,
-            }}>{countdown}s</span>
-          </>
-        )}
-        {isDemo && (
-          <>
-            <span style={{ color: 'rgba(255,255,255,0.14)' }}>·</span>
-            <span style={{ padding: '1px 7px', background: 'rgba(139,92,246,0.22)', border: '1px solid rgba(139,92,246,0.38)', borderRadius: 6, color: '#a78bfa', fontSize: 8, fontWeight: 700 }}>DEMO</span>
-          </>
-        )}
-      </div>
+          <span style={{ color: 'rgba(255,255,255,0.65)' }}>
+            {isDeciding
+              ? <span key={decidingIdx} style={{ animation: 'cc-fadein .3s ease' }}>{DECIDING_TEXTS[decidingIdx]}</span>
+              : phase === 'betting_open'   ? 'BET OPEN'
+              : phase === 'betting_locked' ? 'LOCKED'
+              : isResult && resultOutcome  ? <span style={{ color: resultOutcome.color, fontWeight: 800 }}>{resultOutcome.label}</span>
+              : 'WAITING'
+            }
+          </span>
+          {!isDeciding && countdown !== null && (
+            <>
+              <span style={{ color: 'rgba(255,255,255,0.15)' }}>·</span>
+              <span style={{
+                fontFamily: MONO, fontVariantNumeric: 'tabular-nums',
+                color: countdown <= 10 ? '#F59E0B' : 'rgba(255,255,255,0.82)',
+                fontWeight: 700,
+              }}>{countdown}s</span>
+            </>
+          )}
+          {isDemo && (
+            <>
+              <span style={{ color: 'rgba(255,255,255,0.14)' }}>·</span>
+              <span style={{ padding: '1px 7px', background: 'rgba(139,92,246,0.22)', border: '1px solid rgba(139,92,246,0.38)', borderRadius: 6, color: '#a78bfa', fontSize: 8, fontWeight: 700 }}>DEMO</span>
+            </>
+          )}
+        </div>
+      )}
 
-      {/* ── Collapsed panel tab ──────────────────────────────────────── */}
-      {/* FIX: hide collapsed tab during close animation too */}
-      {!panelOpen && !panelClosing && (
+      {/* ── Collapsed panel tab — vertical edge tab on desktop/tablet, full-width bottom bar on mobile ── */}
+      {(isMobile ? mobileSheet === null : !panelOpen && !panelClosing) && (
         <button
-          onClick={() => setPanelOpen(true)}
-          style={{
+          onClick={() => isMobile ? setMobileSheet('bet') : setPanelOpen(true)}
+          style={isMobile ? {
+            position: 'fixed', left: 12, right: 12, bottom: 12, zIndex: 100,
+            padding: '14px 20px',
+            paddingBottom: 'calc(14px + env(safe-area-inset-bottom, 0px))',
+            ...glassSurface,
+            border: 'none',
+            borderRadius: 16,
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          } : {
             position: 'fixed', left: 0, top: '50%', transform: 'translateY(-50%)',
             zIndex: 100, padding: '18px 7px',
             ...glassSurface,
@@ -924,22 +1266,47 @@ export default function BettingPanel({
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
           }}
         >
-          <GiChessKnight size={16} color="#a78bfa" style={{ filter: 'drop-shadow(0 0 4px #a78bfa)' }} />
-          <span style={{
-            fontFamily: INTER, fontSize: 8, fontWeight: 700, letterSpacing: '0.14em',
-            color: 'rgba(255,255,255,0.35)', writingMode: 'vertical-rl', textOrientation: 'mixed',
-          }}>BET</span>
-          {/* FIX: replaced › unicode with react-icon */}
-          <FaChevronRight size={11} color="rgba(255,255,255,0.22)" />
+          {isMobile ? (
+            <>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                <GiChessKnight size={16} color="#a78bfa" style={{ filter: 'drop-shadow(0 0 4px #a78bfa)' }} />
+                <span style={{ fontFamily: INTER, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: 'rgba(255,255,255,0.55)' }}>
+                  {selected !== null ? `${OUTCOMES[selected].label} · ${wagerInput || 0} ${symbol}` : 'TAP TO BET'}
+                </span>
+              </span>
+              <FaChevronRight size={11} color="rgba(255,255,255,0.22)" style={{ transform: 'rotate(-90deg)' }} />
+            </>
+          ) : (
+            <>
+              <GiChessKnight size={16} color="#a78bfa" style={{ filter: 'drop-shadow(0 0 4px #a78bfa)' }} />
+              <span style={{
+                fontFamily: INTER, fontSize: 8, fontWeight: 700, letterSpacing: '0.14em',
+                color: 'rgba(255,255,255,0.35)', writingMode: 'vertical-rl', textOrientation: 'mixed',
+              }}>BET</span>
+              <FaChevronRight size={11} color="rgba(255,255,255,0.22)" />
+            </>
+          )}
         </button>
       )}
 
       {/* ── Left panel ───────────────────────────────────────────────── */}
       {/* FIX: keep rendered during panelClosing so exit animation plays */}
-      {(panelOpen || panelClosing) && (
-        <div className="cc-panel" style={{
+      {(isMobile ? mobileSheet !== null : (panelOpen || panelClosing)) && (
+        <div className="cc-panel" style={isMobile ? {
+          position: 'fixed', left: 12, right: 12, bottom: 12,
+          maxHeight: '70vh',
+          borderRadius: 20, zIndex: 100,
+          overflowY: 'auto', overflowX: 'hidden',
+          display: 'flex', flexDirection: 'column',
+          ...glassSurface,
+          background: 'rgba(8,9,22,0.72)',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          animation: panelClosing
+            ? 'cc-sheet-out .24s cubic-bezier(.23,1,.32,1) forwards'
+            : 'cc-sheet-in .25s cubic-bezier(.23,1,.32,1)',
+        } : {
           position: 'fixed', top: '50%', left: 14,
-          width: 'clamp(220px, 22vw, 270px)',
+          width: isTablet ? 'clamp(200px, 26vw, 250px)' : 'clamp(220px, 22vw, 270px)',
           transform: 'translateY(-50%)',
           maxHeight: 'calc(100vh - 28px)',
           borderRadius: 20, zIndex: 100,
@@ -955,6 +1322,11 @@ export default function BettingPanel({
           {/* Top sheen */}
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '25%', borderRadius: '20px 20px 0 0', background: 'linear-gradient(180deg,rgba(255,255,255,0.07) 0%,transparent 100%)', pointerEvents: 'none', zIndex: 1 }} />
 
+          {/* On mobile, BETS/MOVES take over this same sheet slot instead of
+              their own floating dock — everything below through the CTA is
+              the "bet" tab's content, unchanged, just now conditional */}
+          {(!isMobile || mobileSheet === 'bet') && (
+          <>
           {/* Header + collapse button */}
           <div style={{ padding: '18px 18px 14px', flexShrink: 0, position: 'relative' }}>
             {/* FIX: ♟ unicode → GiChessPawn react-icon */}
@@ -1124,6 +1496,38 @@ export default function BettingPanel({
               </div>
             )}
           </div>
+          </>
+          )}
+
+          {/* Mobile-only: BETS / MOVES content, sharing this same sheet */}
+          {isMobile && mobileSheet === 'bets' && (
+            <>
+              <div style={{ padding: '18px 18px 10px', flexShrink: 0, position: 'relative' }}>
+                <div style={{ fontFamily: INTER, fontSize: 13, fontWeight: 800, letterSpacing: '0.06em', color: 'rgba(255,255,255,0.9)', textAlign: 'center' }}>
+                  RECENT ROUNDS
+                </div>
+                <button onClick={handlePanelClose} style={{ position: 'absolute', top: 14, right: 14, background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 6px', borderRadius: 6 }}>
+                  <FaChevronLeft size={12} color="rgba(255,255,255,0.35)" style={{ transform: 'rotate(-90deg)' }} />
+                </button>
+              </div>
+              <Divider />
+              <RecentRoundsPanel />
+            </>
+          )}
+          {isMobile && mobileSheet === 'moves' && (
+            <>
+              <div style={{ padding: '18px 18px 10px', flexShrink: 0, position: 'relative' }}>
+                <div style={{ fontFamily: INTER, fontSize: 13, fontWeight: 800, letterSpacing: '0.06em', color: 'rgba(255,255,255,0.9)', textAlign: 'center' }}>
+                  MOVE HISTORY
+                </div>
+                <button onClick={handlePanelClose} style={{ position: 'absolute', top: 14, right: 14, background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 6px', borderRadius: 6 }}>
+                  <FaChevronLeft size={12} color="rgba(255,255,255,0.35)" style={{ transform: 'rotate(-90deg)' }} />
+                </button>
+              </div>
+              <Divider />
+              <MoveLogPanel moveLog={moveLog} openIndex={movesOpenIdx} />
+            </>
+          )}
         </div>
       )}
     </>

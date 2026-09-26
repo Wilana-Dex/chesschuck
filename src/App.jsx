@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import ChessBoard from './components/ChessBoard'
 import BettingPanel from './components/BettingPanel'
 import { useCasinoHost } from './hooks/useCasinoHost'
+import { useViewport } from './hooks/useViewport'
 import StandaloneOverlay from './components/StandaloneOverlay' 
 
 const supabase = createClient(
@@ -33,6 +34,7 @@ export default function App() {
   const [startedAt,  setStartedAt]  = useState(null)
   const [isDeciding, setIsDeciding] = useState(false)
   const [envMode,    setEnvMode]    = useState(false)
+  const [moveLog,    setMoveLog]    = useState([])
 
   // Tracks which round_id has had its moves committed to state.
   // Whichever fires second (broadcast vs DB fetch) checks this and bails,
@@ -43,6 +45,7 @@ export default function App() {
   const fetchCurrentRoundRef  = useRef(null)
 
   const { hostApi, snapshot, isDemo } = useCasinoHost()
+  const { tier } = useViewport()
 
   useEffect(() => {
     async function fetchCurrentRound() {
@@ -150,6 +153,10 @@ export default function App() {
 
   useEffect(() => { setIsDeciding(false) }, [roundId])
 
+  // Move log — one round's worth of live moves, cleared the instant a new round starts
+  useEffect(() => { setMoveLog([]) }, [roundId])
+  const handleMove = useCallback((m) => setMoveLog(prev => [...prev, m]), [])
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#09090f', overflow: 'hidden' }}>
       {/* Board — full screen so the 3D room renders behind the glass panel */}
@@ -158,6 +165,7 @@ export default function App() {
           moves={moves} moveCount={moveCount} phase={phase}
           outcome={outcome} startedAt={startedAt}
           isDeciding={isDeciding} envMode={envMode}
+          onMove={handleMove}
         />
       </div>
 
@@ -168,9 +176,11 @@ export default function App() {
         hostApi={hostApi} snapshot={snapshot} isDemo={isDemo}
         envMode={envMode} onEnvToggle={() => setEnvMode(e => !e)}
         panelW={PANEL_W}
+        moveLog={moveLog}
+        tier={tier}
       />
 
-      <StandaloneOverlay isDemo={isDemo} />
+      <StandaloneOverlay isDemo={isDemo} isMobile={tier === 'mobile'} />
     </div>
   )
 }

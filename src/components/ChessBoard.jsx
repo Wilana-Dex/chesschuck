@@ -22,6 +22,17 @@ const SCALE         = 8
 const PLAY_WINDOW   = 80
 const INITIAL_DELAY = 1.8
 
+// Camera was framed for a wide desktop window. Vertical FOV is fixed at 42°,
+// so a narrower (portrait) aspect ratio only crops the sides — it doesn't
+// shrink the board. Pulling the camera back proportionally as aspect narrows
+// keeps the whole board in frame and reads as the board actually shrinking
+// on a phone, instead of getting cropped.
+const BASE_CAM_POS = new THREE.Vector3(0, 6.5, 6)
+const REF_ASPECT   = 16 / 10
+function cameraDistanceScale(aspect) {
+  return Math.min(2.15, Math.max(1, REF_ASPECT / aspect))
+}
+
 function calcTiming(plyCount) {
   const count       = Math.max(1, plyCount)
   const usable      = PLAY_WINDOW - INITIAL_DELAY
@@ -90,10 +101,12 @@ export default function ChessBoard({
   startedAt  = null,
   isDeciding = false,
   envMode    = false,
+  onMove     = () => {},
 }) {
   const mountRef    = useRef(null)
   const sceneRef    = useRef(null)
   const camRef      = useRef(null)
+  const camScaleRef = useRef(1)   // current camera-distance scale, kept in sync by onResize
   const rendRef     = useRef(null)
   const rafRef      = useRef(null)
   const rootRef     = useRef(null)
@@ -302,6 +315,9 @@ export default function ChessBoard({
   }
 
   // ── playNext ───────────────────────────────────────────────────
+  const onMoveRef   = useRef(onMove)
+  useEffect(() => { onMoveRef.current = onMove }, [onMove])
+
   const playNextRef = useRef(null)
   playNextRef.current = async function playNext(epoch) {
     if (epoch !== epochRef.current || deadRef.current) return
@@ -330,6 +346,8 @@ export default function ChessBoard({
     handleSpecial(result, animDur)
 
     if (epoch !== epochRef.current || deadRef.current) return
+
+    onMoveRef.current(result)
 
     idxRef.current = idx + 1
     if (idx + 1 < moveList.length) {
@@ -458,8 +476,9 @@ export default function ChessBoard({
       const cam = camRef.current
       if (cam) {
         panRef.current?.kill()
+        const s = camScaleRef.current
         gsap.to(cam.position, {
-          x: 0, y: 5.0, z: 5.0,
+          x: 0, y: 5.0 * s, z: 5.0 * s,
           duration: 2.5, ease: 'power2.inOut',
           delay: winDelay,
           onUpdate: () => cam.lookAt(0, 0, 0),
@@ -518,7 +537,8 @@ export default function ChessBoard({
     sceneRef.current = scene
 
     const cam = new THREE.PerspectiveCamera(42, W / H, 0.1, 200)
-    cam.position.set(0, 6.5, 6)
+    camScaleRef.current = cameraDistanceScale(W / H)
+    cam.position.copy(BASE_CAM_POS).multiplyScalar(camScaleRef.current)
     cam.lookAt(0, 0, 0)
     camRef.current = cam
 
@@ -564,6 +584,9 @@ export default function ChessBoard({
       const h = mountRef.current.clientHeight
       if (!w || !h) return
       cam.aspect = w / h
+      camScaleRef.current = cameraDistanceScale(w / h)
+      cam.position.copy(BASE_CAM_POS).multiplyScalar(camScaleRef.current)
+      cam.lookAt(0, 0, 0)
       cam.updateProjectionMatrix()
       renderer.setSize(w, h)
     }
@@ -722,17 +745,18 @@ export default function ChessBoard({
     curPhaseRef.current = phase
     const cam = camRef.current
     if (!cam) return
+    const s = camScaleRef.current
     if (phase === 'betting_locked') {
       panRef.current?.kill()
       panRef.current = gsap.timeline({ repeat: -1 })
-        .to(cam.position, { x: -3.5, y: 5.5, z: 4.5, duration: 18, ease: 'sine.inOut', onUpdate: () => cam.lookAt(0, 0, 0) })
-        .to(cam.position, { x: 0,    y: 7,   z: 3.5, duration: 9,  ease: 'sine.inOut', onUpdate: () => cam.lookAt(0, 0, 0) })
-        .to(cam.position, { x: 3.5,  y: 5.5, z: 4.5, duration: 18, ease: 'sine.inOut', onUpdate: () => cam.lookAt(0, 0, 0) })
-        .to(cam.position, { x: 0,    y: 6.5, z: 6,   duration: 9,  ease: 'sine.inOut', onUpdate: () => cam.lookAt(0, 0, 0) })
+        .to(cam.position, { x: -3.5 * s, y: 5.5 * s, z: 4.5 * s, duration: 18, ease: 'sine.inOut', onUpdate: () => cam.lookAt(0, 0, 0) })
+        .to(cam.position, { x: 0,        y: 7 * s,   z: 3.5 * s, duration: 9,  ease: 'sine.inOut', onUpdate: () => cam.lookAt(0, 0, 0) })
+        .to(cam.position, { x: 3.5 * s,  y: 5.5 * s, z: 4.5 * s, duration: 18, ease: 'sine.inOut', onUpdate: () => cam.lookAt(0, 0, 0) })
+        .to(cam.position, { x: 0,        y: 6.5 * s, z: 6 * s,   duration: 9,  ease: 'sine.inOut', onUpdate: () => cam.lookAt(0, 0, 0) })
     }
     if (phase === 'betting_open' || phase === 'waiting') {
       panRef.current?.kill()
-      gsap.to(cam.position, { x: 0, y: 6.5, z: 6, duration: 1.5, ease: 'power2.inOut', onUpdate: () => cam.lookAt(0, 0, 0) })
+      gsap.to(cam.position, { x: 0, y: 6.5 * s, z: 6 * s, duration: 1.5, ease: 'power2.inOut', onUpdate: () => cam.lookAt(0, 0, 0) })
     }
   }, [phase])
 

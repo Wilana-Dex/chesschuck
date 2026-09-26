@@ -302,7 +302,7 @@ const TABS = [
   { key: 'payouts',  label: 'PAYOUTS',   icon: FaTrophy      },
 ]
 
-export default function StandaloneOverlay({ isDemo }) {
+export default function StandaloneOverlay({ isDemo, isMobile = false }) {
   const [open, setOpen] = useState(false)
   const [tab,  setTab]  = useState('round')
 
@@ -312,15 +312,20 @@ export default function StandaloneOverlay({ isDemo }) {
     <>
       <style>{CSS}</style>
 
-      {/* ── HOW IT WORKS pill — TRUE viewport center ─────────────── */}
+      {/* ── HOW IT WORKS pill — TRUE viewport center. Raised above the
+          collapsed bottom bar on mobile so they don't stack ────────── */}
       <button
         onClick={() => { setOpen(true); setTab('round') }}
         style={{
           position: 'fixed',
-          bottom: 28,
+          bottom: isMobile ? 76 : 28,
           left: '50%',
           transform: 'translateX(-50%)',
-          zIndex: 300,
+          // Lower than the mobile sheet's z-index (100) on purpose — an
+          // expanded sheet sits fully on top of this; it only reappears
+          // once everything's collapsed back down, since the collapsed
+          // bar's footprint doesn't reach up this far.
+          zIndex: isMobile ? 50 : 300,
           display: 'flex', alignItems: 'center', gap: 9,
           padding: '11px 26px',
           background:           'rgba(7,8,20,0.88)',
